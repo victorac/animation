@@ -1,112 +1,143 @@
-import { useCallback, useRef } from 'react';
-import anime from 'animejs/lib/anime.es.js';
+import { useCallback, useRef, useEffect, useState } from "react";
+import anime from "animejs/lib/anime.es.js";
+import { useHorizontalAnimation } from "./useHorizontalAnimation";
+import { useVerticalAnimation } from "./useVerticalAnimation";
+import { useDiagonalAnimation } from "./useDiagonalAnimation";
 
-const NORMAL = "M68 23C68 32.9411 59.665 41 50 41C40.335 41 32 32.9411 32 23C32 13.0589 40.335 5 50 5C59.665 5 68 13.0589 68 23Z";
-const MOVING = "M68 23C68 31.8366 59.665 39 50 39C40.335 39 32 31.8366 32 23C32 14.1634 40.335 7 50 7C59.665 7 68 14.1634 68 23Z";
+const NORMAL =
+  "M68 23C68 32.9411 59.665 41 50 41C40.335 41 32 32.9411 32 23C32 13.0589 40.335 5 50 5C59.665 5 68 13.0589 68 23Z";
+const MOVING =
+  "M68 23C68 31.8366 59.665 39 50 39C40.335 39 32 31.8366 32 23C32 14.1634 40.335 7 50 7C59.665 7 68 14.1634 68 23Z";
 
 export const useAnimation = (
   containerRef: React.RefObject<HTMLDivElement>,
   svgRef: React.RefObject<SVGSVGElement>
 ) => {
+  const [containerDimensions, setContainerDimensions] = useState({
+    width: 0,
+    height: 0,
+  });
   const animationRef = useRef<anime.AnimeInstance | null>(null);
+  const morphAnimationRef = useRef<anime.AnimeInstance | null>(null);
+  const originalSvgDimensions = useRef<{
+    width: number;
+    height: number;
+  } | null>(null);
 
-  const animate = useCallback((type: "horizontal" | "vertical" | "diagonal") => {
-    if (!containerRef.current || !svgRef.current) return;
+  const updateContainerDimensions = useCallback(() => {
+    if (containerRef.current) {
+      setContainerDimensions({
+        width: containerRef.current.offsetWidth,
+        height: containerRef.current.offsetHeight,
+      });
+    }
+  }, [containerRef]);
+  useEffect(() => {
+    updateContainerDimensions();
+    window.addEventListener("resize", updateContainerDimensions);
+    return () => {
+      window.removeEventListener("resize", updateContainerDimensions);
+    };
+  }, [updateContainerDimensions]);
 
-    const containerWidth = containerRef.current.offsetWidth + 64;
-    const containerHeight = containerRef.current.offsetHeight;
-    const svgWidth = svgRef.current.getBoundingClientRect().width;
-    const svgHeight = svgRef.current.getBoundingClientRect().height;
-
-    // Stop the previous animation if it exists
+  const cleanupAnimations = useCallback(() => {
     if (animationRef.current) {
       animationRef.current.pause();
+      animationRef.current = null;
     }
-
-    // Set initial position
-    anime.set(svgRef.current, {
-      translateX: '-32px',
-      translateY: `-${svgHeight / 2}px`,
-      top: type === 'horizontal' ? 'calc(50% - 5px)' : '-5px',
-      left: type === 'vertical' ? 'calc(50% - 32px)' : '-32px',
-    });
-
-    const duration = 2000;
-
-    switch (type) {
-      case "horizontal":
-        animateHorizontal(containerWidth, svgWidth, duration);
-        break;
-      case "vertical":
-        animateVertical(containerHeight, svgHeight, duration);
-        break;
-      case "diagonal":
-        animateDiagonal(containerWidth, containerHeight, svgWidth, svgHeight, duration);
-        break;
+    if (morphAnimationRef.current) {
+      morphAnimationRef.current.pause();
+      morphAnimationRef.current = null;
     }
+  }, []);
 
-    // Return a cleanup function
-    return () => {
-      if (animationRef.current) {
-        animationRef.current.pause();
+  useEffect(() => {
+    return cleanupAnimations;
+  }, [cleanupAnimations]);
+
+  const animate = useCallback(
+    (type: "horizontal" | "vertical" | "diagonal") => {
+      if (!containerRef.current || !svgRef.current) return;
+      cleanupAnimations();
+
+      const { width: containerWidth, height: containerHeight } =
+        containerDimensions;
+      const hypotenuse = Math.sqrt(containerWidth ** 2 + containerHeight ** 2);
+      const diagonalAngle =
+        Math.asin(containerHeight / hypotenuse) * (180 / Math.PI);
+
+      let svgWidth: number;
+      let svgHeight: number;
+
+      if (!originalSvgDimensions.current) {
+        svgWidth = svgRef.current.getBoundingClientRect().width;
+        svgHeight = svgRef.current.getBoundingClientRect().height;
+        originalSvgDimensions.current = { width: svgWidth, height: svgHeight };
+      } else {
+        ({ width: svgWidth, height: svgHeight } =
+          originalSvgDimensions.current);
       }
-    };
-  }, [containerRef, svgRef]);
 
-  const animateHorizontal = (containerWidth: number, svgWidth: number, duration: number) => {
-    const rightPosition = containerWidth - svgWidth;
-    
-    animationRef.current = anime({
-      targets: svgRef.current,
-      translateX: [0, rightPosition],
-      duration: duration,
-      easing: 'easeInOutSine',
-      direction: 'alternate',
-      loop: true,
-    });
+      const leftMargin = svgWidth * (32 / 100);
+      const topMargin = svgHeight * (5 / 46);
 
-    addMorphingAnimation(duration);
-  };
+      anime.set(svgRef.current, {
+        visibility: "visible",
+        translateX: type === "vertical" ? "-50%" : `-${leftMargin}px`,
+        translateY: type === "horizontal" ? "-50%" : `-${topMargin}px`,
+        top: type === "horizontal" ? "50%" : "0px",
+        left: type === "vertical" ? "50%" : "0px",
+        rotate:
+          type === "horizontal" ? 0 : type === "vertical" ? 90 : diagonalAngle,
+      });
 
-  const animateVertical = (containerHeight: number, svgHeight: number, duration: number) => {
-    const bottomPosition = containerHeight - svgHeight;
-    
-    animationRef.current = anime({
-      targets: svgRef.current,
-      translateY: [0, bottomPosition],
-      duration: duration,
-      easing: 'easeInOutSine',
-      direction: 'alternate',
-      loop: true,
-    });
+      const duration = 2000;
 
-    addMorphingAnimation(duration);
-  };
-
-  const animateDiagonal = (containerWidth: number, containerHeight: number, svgWidth: number, svgHeight: number, duration: number) => {
-    const rightPosition = containerWidth - svgWidth;
-    const bottomPosition = containerHeight - svgHeight;
-
-    animationRef.current = anime({
-      targets: svgRef.current,
-      translateX: [0, rightPosition],
-      translateY: [0, bottomPosition],
-      duration: duration,
-      easing: 'easeInOutSine',
-      direction: 'alternate',
-      loop: true,
-    });
-
-    addMorphingAnimation(duration);
-  };
+      switch (type) {
+        case "horizontal":
+          animationRef.current = useHorizontalAnimation(
+            svgRef,
+            containerWidth,
+            svgWidth,
+            leftMargin,
+            duration
+          );
+          break;
+        case "vertical":
+          animationRef.current = useVerticalAnimation(
+            svgRef,
+            containerHeight,
+            svgHeight,
+            leftMargin,
+            topMargin,
+            duration
+          );
+          break;
+        case "diagonal":
+          animationRef.current = useDiagonalAnimation(
+            svgRef,
+            containerWidth,
+            containerHeight,
+            svgWidth,
+            svgHeight,
+            leftMargin,
+            topMargin,
+            duration
+          );
+          break;
+      }
+      addMorphingAnimation(duration);
+    },
+    [containerDimensions, cleanupAnimations]
+  );
 
   const addMorphingAnimation = (duration: number) => {
-    anime({
+    morphAnimationRef.current = anime({
       targets: "path",
       d: [NORMAL, MOVING],
       duration: duration * 0.5,
-      easing: 'easeInOutSine',
-      direction: 'alternate',
+      easing: "easeInOutSine",
+      direction: "alternate",
       loop: true,
     });
   };
